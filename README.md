@@ -77,20 +77,43 @@ Results will be saved in the results/ directory, including per-method performanc
 Our experiments demonstrate detailed performance comparison across all six methods, analysis of LLM reliability in annotation tasks, key findings and identified research gaps, and validation metrics for annotation quality. See our paper for complete results and analysis.
 
 📁 Repository Structure
-.
-├── dataset.xlsx              # Annotated requirement dataset
-├── .env                       # Environment configuration (create this)
-├── .gitignore                 # Git ignore rules
-├── requirements.txt           # Python dependencies
-├── run_experiments.py         # Main experiment runner
-├── README.md                   # This file
-├── methods/                    # Implementation of all methods
-│   ├── bert/
-│   ├── cda-mrcv/
-│   ├── mg-cce/
-│   ├── progress/
-│   ├── rcpp/
-│   └── saip/
-├── results/                    # Experiment results
-├── utils/                      # Utility functions
-└── config/                     # Configuration files
+Root Directory Files
+
+  dataset.xlsx — Annotated requirement dataset
+
+  .env — Environment configuration (create this)
+
+  .gitignore — Git ignore rules
+
+  requirements.txt — Python dependencies
+
+  run_experiments.py — Main experiment runner
+
+  README.md — This file
+
+Methods Directory
+
+  methods/bert/ — BERT implementation
+
+  methods/cda-mrcv/ — CDA-MRCV implementation
+
+  methods/mg-cce/ — MG-CCE implementation
+
+  methods/progress/ — PROGRESS implementation
+
+  methods/rcpp/ — RCPP implementation
+
+  methods/saip/ — SAIP implementation
+
+Other Directories
+
+  results/ — Experiment results
+
+  utils/ — Utility functions
+
+  config/ — Configuration files
+
+
+📝 Citation
+If you use this code or dataset in your research, please cite our paper:
+He, J., Osman, M. H., Hassan, S., & Yap, N. K. (2026). PROGRESS: A Large Language Model-Based Chinese Software Requirements Annotation System. Knowledge-Based System.
