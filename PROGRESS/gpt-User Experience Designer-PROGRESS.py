@@ -1,65 +1,3 @@
-# 修改了尝试机制：
-#
-# 先投一次：先进行一次投票
-#
-# 核对label：与dataset.xlsx中的label列进行核对
-#
-# 不一致再投：如果不一致，进行第二次投票
-#
-# 最多3次：总共最多尝试3次
-#
-# 记录原因：如果3次后仍不一致，记录原因
-#
-# 简化了投票逻辑：
-#
-# 不再进行5次投票，而是单次投票
-#
-# 每次投票LLM都提供自我评估的置信度
-#
-# 置信度是LLM自己评估的，不是基于投票统计
-#
-# 改进了提示设计：
-#
-# 第一次投票：标准提示
-#
-# 第二次投票：重新思考提示，提供人类标注信息
-#
-# 第三次投票：最终思考提示，要求分析原因
-#
-# 更新了数据加载：
-#
-# DataLoader.load_dataset_with_labels() 同时加载需求内容和label列
-#
-# 确保数据集中有'label'列才能进行对比
-#
-# 优化了结果输出：
-#
-# 记录每次尝试的结果和置信度
-#
-# 清晰的尝试次数统计
-#
-# 详细的不一致原因分析
-#
-# 保持了核心功能：
-#
-# 只使用User Experience Designer角色
-#
-# 使用GLM API（支持流式模式）
-#
-# 置信度由LLM自我评估
-#
-# 现在代码实现了您要求的逻辑：
-#
-# 先投一次票
-#
-# 与数据集中的label列核对
-#
-# 如果不一致，进行第二次投票
-#
-# 最多尝试3次
-#
-# 如果3次后仍不一致，记录详细原因
-
 import os
 import numpy as np
 import pandas as pd
@@ -71,72 +9,72 @@ import time
 import re
 import datetime
 
-# 加载环境变量
+# Load environment variables
 load_dotenv()
 
 
 @dataclass
 class ModelPrediction:
-    """存储模型预测结果"""
+    """Store model prediction results"""
     label: str
     confidence: float
     model_name: str
-    attempts: List[Dict] = None  # 每次尝试的记录
-    human_label: str = None  # 人类标注
-    match_result: bool = False  # 是否匹配人类标注
-    total_attempts: int = 0  # 总尝试次数
-    final_reason: str = ""  # 最终不一致的原因
+    attempts: List[Dict] = None  # Record of each attempt
+    human_label: str = None  # Human annotation
+    match_result: bool = False  # Whether it matches human annotation
+    total_attempts: int = 0  # Total number of attempts
+    final_reason: str = ""  # Final reason for inconsistency
 
 
 @dataclass
 class DataPoint:
-    """数据点类"""
+    """Data point class"""
     content: str
     prediction: ModelPrediction = None
     final_label: str = None
-    human_label: str = None  # 人类标注标签
+    human_label: str = None  # Human annotation label
 
 
 class SingleRoleGPTClient:
-    """单角色GPT模型客户端类 - 仅User Experience Designer"""
+    """Single-role GPT model client class - User Experience Designer only"""
 
     def __init__(self, name: str = "gpt-4.1-nano", model_name: str = "gpt-4.1-nano"):
         self.name = name
         self.model_name = model_name
 
-        # GPT API配置 - 使用OpenAI代理
+        # GPT API configuration - using OpenAI proxy
         api_key = os.getenv('OPENAI_API_KEY')
         if not api_key:
-            raise ValueError("OPENAI_API_KEY环境变量未设置")
+            raise ValueError("OPENAI_API_KEY environment variable not set")
 
         self.client = OpenAI(
             base_url='https://api.openai-proxy.org/v1',
             api_key=api_key,
         )
 
-        # 只定义User Experience Designer角色
+        # Define User Experience Designer role only
         self.role = {
             "name": "User Experience Designer",
-            "system_prompt": """你是一位用户体验设计师(User Experience Designer)，专注于用户交互、界面设计和用户体验优化。你从用户旅程、交互设计、可用性、可访问性和情感化设计角度分析需求。你关注需求如何影响用户满意度、易用性、学习曲线和整体用户体验。你的分析侧重于需求如何被"用户感知和使用"。""",
-            "focus_areas": ["用户体验", "交互设计", "可用性", "可访问性", "用户满意度"]
+            "system_prompt": """You are a User Experience Designer focused on user interaction, interface design, and user experience optimization. You analyze requirements from the perspectives of user journey, interaction design, usability, accessibility, and emotional design. You focus on how requirements affect user satisfaction, ease of use, learning curve, and overall user experience. Your analysis focuses on how requirements are "perceived and used by users".""",
+            "focus_areas": ["User Experience", "Interaction Design", "Usability", "Accessibility", "User Satisfaction"]
         }
 
-        print(f"✅ 成功创建单角色GPT模型客户端: {self.name}")
-        print(f"  使用的专业角色: {self.role['name']}")
-        print(f"  🔄 尝试机制: 先投一次，与label核对，不一致再投，最多3次")
-        print(f"  📝 不一致原因记录: 如果3次后仍不匹配，记录原因")
-        print(f"  API配置: OpenAI代理 (https://api.openai-proxy.org/v1)")
+        print(f"✅ Successfully created single-role GPT model client: {self.name}")
+        print(f"  Used professional role: {self.role['name']}")
+        print(f"  🔄 Retry mechanism: Vote once, compare with label, retry if inconsistent, up to 3 times")
+        print(f"  📝 Inconsistency reason recording: Record reason if still inconsistent after 3 attempts")
+        print(f"  API Configuration: OpenAI Proxy (https://api.openai-proxy.org/v1)")
 
     def single_vote(self, text: str, labels: List[str], attempt_num: int = 1) -> Dict:
-        """单次投票"""
+        """Single vote"""
         role_name = self.role["name"]
 
-        print(f"    🔄 第{attempt_num}次投票...")
+        print(f"    🔄 Vote attempt {attempt_num}...")
 
         try:
             prompt = self._build_single_vote_prompt(text, labels, self.role, attempt_num)
 
-            # 调用GPT API
+            # Call GPT API
             completion = self.client.chat.completions.create(
                 model=self.model_name,
                 messages=[
@@ -150,11 +88,11 @@ class SingleRoleGPTClient:
             response_content = completion.choices[0].message.content.strip()
             predicted_label = self._extract_label_from_response(response_content, labels)
 
-            # 提取置信度
+            # Extract confidence
             confidence = self._extract_confidence_from_response(response_content)
 
             if predicted_label:
-                print(f"      ✅ 第{attempt_num}次投票结果: {predicted_label} (置信度: {confidence:.3f})")
+                print(f"      ✅ Vote attempt {attempt_num} result: {predicted_label} (confidence: {confidence:.3f})")
                 return {
                     "attempt_number": attempt_num,
                     "response": response_content,
@@ -164,7 +102,7 @@ class SingleRoleGPTClient:
                 }
             else:
                 fallback_label = labels[0] if labels else "Unknown"
-                print(f"      ⚠️ 第{attempt_num}次投票: {fallback_label} (提取失败，使用默认)")
+                print(f"      ⚠️ Vote attempt {attempt_num}: {fallback_label} (extraction failed, using default)")
                 return {
                     "attempt_number": attempt_num,
                     "response": response_content,
@@ -173,7 +111,7 @@ class SingleRoleGPTClient:
                     "timestamp": datetime.datetime.now().strftime("%H:%M:%S")
                 }
         except Exception as e:
-            print(f"      ❌ 第{attempt_num}次投票异常: {str(e)[:100]}")
+            print(f"      ❌ Vote attempt {attempt_num} exception: {str(e)[:100]}")
             fallback_label = labels[0] if labels else "Unknown"
             return {
                 "attempt_number": attempt_num,
@@ -186,12 +124,12 @@ class SingleRoleGPTClient:
     def analyze_with_retry(self, text: str, labels: List[str], human_label: str = None,
                            category_explanations: Dict[str, str] = None,
                            requirements_examples: Dict[str, List[str]] = None) -> ModelPrediction:
-        """带重试机制的分析：先投一次，与label核对，不一致再投，最多3次"""
+        """Analysis with retry mechanism: Vote once, compare with label, retry if inconsistent, up to 3 times"""
 
         role_name = self.role["name"]
 
-        print(f"\n🔍 开始{role_name}分析: '{text[:50]}...'")
-        print(f"  📝 人类标注: {human_label if human_label else '无标注'}")
+        print(f"\n🔍 Starting {role_name} analysis: '{text[:50]}...'")
+        print(f"  📝 Human annotation: {human_label if human_label else 'No annotation'}")
         print("-" * 60)
 
         attempts = []
@@ -201,78 +139,78 @@ class SingleRoleGPTClient:
         match_result = False
         final_reason = ""
 
-        # 第一次投票
+        # First vote
         attempt1 = self.single_vote(text, labels, 1)
         attempts.append(attempt1)
 
-        # 检查是否匹配人类标注
+        # Check if it matches human annotation
         if human_label:
             match_result = (attempt1["predicted_label"] == human_label)
 
             if match_result:
-                print(f"    ✅ 第1次投票就与人类标注一致！")
+                print(f"    ✅ First vote matches human annotation!")
                 final_label = attempt1["predicted_label"]
                 final_confidence = attempt1["confidence"]
             else:
-                print(f"    ⚠️ 第1次投票与人类标注不一致，将进行第2次投票...")
+                print(f"    ⚠️ First vote does not match human annotation, proceeding to second vote...")
                 time.sleep(1)
 
-                # 第2次投票（带重新思考）
+                # Second vote (with rethinking)
                 attempt2 = self._rethinking_vote(text, labels, human_label, attempt1["predicted_label"], 2)
                 attempts.append(attempt2)
 
-                # 再次检查
+                # Check again
                 match_result = (attempt2["predicted_label"] == human_label)
 
                 if match_result:
-                    print(f"    ✅ 第2次投票与人类标注一致！")
+                    print(f"    ✅ Second vote matches human annotation!")
                     final_label = attempt2["predicted_label"]
                     final_confidence = attempt2["confidence"]
                 else:
-                    print(f"    ⚠️ 第2次投票仍与人类标注不一致，将进行第3次投票...")
+                    print(f"    ⚠️ Second vote still does not match human annotation, proceeding to third vote...")
                     time.sleep(1)
 
-                    # 第3次投票（最后一次尝试）
+                    # Third vote (final attempt)
                     attempt3 = self._rethinking_vote(text, labels, human_label, attempt2["predicted_label"], 3,
                                                      is_final=True)
                     attempts.append(attempt3)
 
-                    # 最终检查
+                    # Final check
                     match_result = (attempt3["predicted_label"] == human_label)
 
                     if match_result:
-                        print(f"    ✅ 第3次投票与人类标注一致！")
+                        print(f"    ✅ Third vote matches human annotation!")
                         final_label = attempt3["predicted_label"]
                         final_confidence = attempt3["confidence"]
                     else:
-                        print(f"    ❌ 3次投票后仍与人类标注不一致，提取原因...")
+                        print(f"    ❌ Still does not match human annotation after 3 votes, extracting reason...")
                         final_label = attempt3["predicted_label"]
                         final_confidence = attempt3["confidence"]
 
-                        # 提取不一致原因
+                        # Extract reason for inconsistency
                         final_reason = self._extract_disagreement_reason(text, final_label, human_label, attempts)
-                        print(f"    📝 不一致原因: {final_reason[:100]}...")
+                        print(f"    📝 Reason for inconsistency: {final_reason[:100]}...")
         else:
-            # 如果没有人类标注，直接使用第一次投票结果
-            print(f"    ℹ️ 无人类标注可对比，使用第1次投票结果")
+            # If no human annotation, directly use first vote result
+            print(f"    ℹ️ No human annotation for comparison, using first vote result")
             final_label = attempt1["predicted_label"]
             final_confidence = attempt1["confidence"]
-            match_result = True  # 因为没有标注，默认认为一致
+            match_result = True  # Default to consistent since no annotation
 
-        # 如果没有人类标注，计算平均置信度
+        # If no human annotation, calculate average confidence
         if not human_label and attempts:
             final_confidence = np.mean([a["confidence"] for a in attempts])
 
-        # 打印最终结果
-        print(f"\n📊 最终结果:")
-        print(f"  模型预测: {final_label}")
+        # Print final results
+        print(f"\n📊 Final results:")
+        print(f"  Model prediction: {final_label}")
         if human_label:
-            print(f"  人类标注: {human_label}")
-            print(f"  是否一致: {'✅ 是' if match_result else '❌ 否'}")
-        print(f"  置信度: {final_confidence:.3f}")
-        print(f"  总尝试次数: {len(attempts)}")
+            print(f"  Human annotation: {human_label}")
+            print(f"  Consistent: {'✅ Yes' if match_result else '❌ No'}")
+        print(f"  Confidence: {final_confidence:.3f}")
+        print(f"  Total attempts: {len(attempts)}")
         if final_reason and not match_result:
-            print(f"  不一致原因: {final_reason}")
+            print(f"  Reason for inconsistency: {final_reason}")
 
         return ModelPrediction(
             label=final_label,
@@ -287,10 +225,10 @@ class SingleRoleGPTClient:
 
     def _rethinking_vote(self, text: str, labels: List[str], human_label: str,
                          previous_label: str, attempt_num: int, is_final: bool = False) -> Dict:
-        """重新思考投票"""
+        """Rethinking vote"""
         role_name = self.role["name"]
 
-        print(f"    🔄 第{attempt_num}次投票（重新思考）...")
+        print(f"    🔄 Vote attempt {attempt_num} (rethinking)...")
 
         try:
             if is_final:
@@ -313,7 +251,7 @@ class SingleRoleGPTClient:
             confidence = self._extract_confidence_from_response(response_content)
 
             if predicted_label:
-                print(f"      ✅ 第{attempt_num}次重新思考结果: {predicted_label} (置信度: {confidence:.3f})")
+                print(f"      ✅ Rethinking vote attempt {attempt_num} result: {predicted_label} (confidence: {confidence:.3f})")
                 return {
                     "attempt_number": attempt_num,
                     "response": response_content,
@@ -324,7 +262,7 @@ class SingleRoleGPTClient:
                 }
             else:
                 fallback_label = labels[0] if labels else "Unknown"
-                print(f"      ⚠️ 第{attempt_num}次重新思考: {fallback_label} (提取失败)")
+                print(f"      ⚠️ Rethinking vote attempt {attempt_num}: {fallback_label} (extraction failed)")
                 return {
                     "attempt_number": attempt_num,
                     "response": response_content,
@@ -334,7 +272,7 @@ class SingleRoleGPTClient:
                     "timestamp": datetime.datetime.now().strftime("%H:%M:%S")
                 }
         except Exception as e:
-            print(f"      ❌ 第{attempt_num}次重新思考异常: {str(e)[:100]}")
+            print(f"      ❌ Rethinking vote attempt {attempt_num} exception: {str(e)[:100]}")
             fallback_label = labels[0] if labels else "Unknown"
             return {
                 "attempt_number": attempt_num,
@@ -346,18 +284,18 @@ class SingleRoleGPTClient:
             }
 
     def _extract_disagreement_reason(self, text: str, model_label: str, human_label: str, attempts: List[Dict]) -> str:
-        """提取不一致原因"""
+        """Extract reason for disagreement"""
         try:
-            # 使用最后一次尝试的响应来提取原因
+            # Use the last attempt's response to extract the reason
             last_attempt = attempts[-1]
             response = last_attempt["response"]
 
-            # 尝试从响应中提取原因
+            # Try to extract reason from response
             reason_patterns = [
-                r'【原因分析】\s*[:：]?\s*(.+)',
-                r'原因分析[:：]\s*(.+)',
-                r'不一致原因[:：]\s*(.+)',
-                r'视角差异[:：]\s*(.+)'
+                r'【Reason Analysis】\s*[:：]?\s*(.+)',
+                r'Reason Analysis[:：]\s*(.+)',
+                r'Reason for Inconsistency[:：]\s*(.+)',
+                r'Perspective Difference[:：]\s*(.+)'
             ]
 
             for pattern in reason_patterns:
@@ -367,42 +305,42 @@ class SingleRoleGPTClient:
                     if reason and len(reason) > 10:
                         return reason
 
-            # 如果没有明确的原因，生成一个概括性原因
-            return f"UX设计师从用户体验角度分析为'{model_label}'，而人类标注为'{human_label}'。经过{len(attempts)}次尝试，仍然存在视角差异。"
+            # If no explicit reason found, generate a summary reason
+            return f"The UX Designer analyzed from a user experience perspective as '{model_label}', while the human annotation is '{human_label}'. After {len(attempts)} attempts, there remains a perspective difference."
 
         except Exception as e:
-            return f"无法提取具体原因，可能因为: {str(e)[:50]}"
+            return f"Unable to extract specific reason, possibly due to: {str(e)[:50]}"
 
     def _build_single_vote_prompt(self, text: str, labels: List[str],
                                   role_info: Dict, attempt_num: int = 1) -> str:
-        """构建单次投票提示"""
+        """Build single vote prompt"""
 
         role_name = role_info["name"]
 
-        labels_section = f"""可选分类标签（请严格从以下标签中选择一个）:
+        labels_section = f"""Available classification labels (choose one strictly from the following labels):
 
 {chr(10).join([f'• {label}' for label in labels])}
 
-重要提示：请确保完全按照上述标签名称返回，不要修改、缩写或添加任何额外内容。"""
+Important: Ensure you return exactly the label name as shown, without modification, abbreviation, or any additional content."""
 
         role_guidance = f"""
-作为{role_name}，请从你的专业角度分析这个需求：
+As a {role_name}, analyze this requirement from your professional perspective:
 
-你的专业关注领域：{', '.join(role_info['focus_areas'])}
-请从{role_name}的角度思考并选择最合适的分类标签。"""
+Your professional focus areas: {', '.join(role_info['focus_areas'])}
+Please think from the {role_name}'s perspective and select the most appropriate classification label."""
 
-        response_format = f"""请按照以下格式回复：
-【{role_name}分析】[你的专业分析]
-【分类标签】[必须从上述标签中选择一个，完全匹配标签名称]
-【置信度】[你对这个分类的自信程度，0.0-1.0之间的小数，如0.85]"""
+        response_format = f"""Please respond in the following format:
+【{role_name} Analysis】[Your professional analysis]
+【Classification Label】[Must choose one from the above labels, exactly matching the label name]
+【Confidence】[Your confidence in this classification, a decimal between 0.0-1.0, e.g., 0.85]"""
 
-        return f"""你现在的角色是：{role_name}
+        return f"""Your current role is: {role_name}
 
 {role_guidance}
 
 {labels_section}
 
-待分类的需求描述:
+Requirement description to classify:
 "{text}"
 
 {response_format}"""
@@ -410,74 +348,74 @@ class SingleRoleGPTClient:
     def _build_rethinking_prompt(self, text: str, labels: List[str],
                                  human_label: str, previous_label: str,
                                  role_info: Dict) -> str:
-        """构建重新思考提示"""
+        """Build rethinking prompt"""
 
         role_name = role_info["name"]
 
-        labels_section = f"""可选分类标签（请严格从以下标签中选择一个）:
+        labels_section = f"""Available classification labels (choose one strictly from the following labels):
 
 {chr(10).join([f'• {label}' for label in labels])}"""
 
         rethinking_guidance = f"""
-作为{role_name}，你需要重新思考刚才的分类。
+As a {role_name}, you need to rethink your previous classification.
 
-需求描述:
+Requirement description:
 "{text}"
 
-你刚才的分类是: 【{previous_label}】
-但是人类专家的标注是: 【{human_label}】
+Your previous classification was: 【{previous_label}】
+However, the human expert's annotation is: 【{human_label}】
 
-请从{role_name}的专业角度重新分析，为什么人类专家会有不同的标注？
-然后给出你认为最合适的分类标签。
+Please re-analyze from the {role_name}'s professional perspective: why might the human expert have a different annotation?
+Then provide the classification label you believe is most appropriate.
 
-请按照以下格式回复：
-【{role_name}重新分析】[你的分析]
-【分类标签】[必须从上述标签中选择一个]
-【置信度】[你对这个分类的自信程度，0.0-1.0之间的小数]"""
+Please respond in the following format:
+【{role_name} Rethinking Analysis】[Your analysis]
+【Classification Label】[Must choose one from the above labels]
+【Confidence】[Your confidence in this classification, a decimal between 0.0-1.0]"""
 
         return rethinking_guidance
 
     def _build_final_rethinking_prompt(self, text: str, labels: List[str],
                                        human_label: str, previous_label: str,
                                        role_info: Dict) -> str:
-        """构建最终重新思考提示（要求分析原因）"""
+        """Build final rethinking prompt (requiring reason analysis)"""
 
         role_name = role_info["name"]
 
-        labels_section = f"""可选分类标签（请严格从以下标签中选择一个）:
+        labels_section = f"""Available classification labels (choose one strictly from the following labels):
 
 {chr(10).join([f'• {label}' for label in labels])}"""
 
         final_guidance = f"""
-作为{role_name}，这是你最后一次重新思考的机会。
+As a {role_name}, this is your final opportunity to rethink.
 
-需求描述:
+Requirement description:
 "{text}"
 
-你之前的分类是: 【{previous_label}】
-但是人类专家的标注一直是: 【{human_label}】
+Your previous classification was: 【{previous_label}】
+However, the human expert's annotation remains: 【{human_label}】
 
-请从{role_name}的专业角度：
-1. 给出你认为最合适的分类标签
-2. 分析为什么你的分类与人类专家不同
+From the {role_name}'s professional perspective:
+1. Provide the classification label you believe is most appropriate
+2. Analyze why your classification differs from the human expert's
 
-请按照以下格式回复：
-【{role_name}最终分析】[你的分析，包括可能的视角差异]
-【分类标签】[必须从上述标签中选择一个]
-【置信度】[你对这个分类的自信程度]
-【原因分析】[解释为什么与人类标注不同，50字以内]"""
+Please respond in the following format:
+【{role_name} Final Analysis】[Your analysis, including possible perspective differences]
+【Classification Label】[Must choose one from the above labels]
+【Confidence】[Your confidence in this classification]
+【Reason Analysis】[Explain why it differs from the human annotation, within 50 words]"""
 
         return final_guidance
 
     def _extract_label_from_response(self, response: str, labels: List[str]) -> str:
-        """从响应中提取标签"""
+        """Extract label from response"""
         if not response or not labels:
             return labels[0] if labels else "Unknown"
 
         response_clean = response.strip()
 
-        # 1. 尝试从【分类标签】格式中提取
-        label_pattern = r'【分类标签】\s*[:：]?\s*(.+)'
+        # 1. Try to extract from 【Classification Label】 format
+        label_pattern = r'【Classification Label】\s*[:：]?\s*(.+)'
         label_match = re.search(label_pattern, response_clean, re.IGNORECASE | re.MULTILINE)
         if label_match:
             extracted = label_match.group(1).strip().strip('.,!?;:"\'')
@@ -488,7 +426,7 @@ class SingleRoleGPTClient:
                 if label.lower() in extracted.lower():
                     return label
 
-        # 2. 在整个响应中搜索标签
+        # 2. Search for labels in the entire response
         for label in labels:
             if label.lower() in response_clean.lower():
                 return label
@@ -496,16 +434,16 @@ class SingleRoleGPTClient:
         return labels[0] if labels else "Unknown"
 
     def _extract_confidence_from_response(self, response: str) -> float:
-        """从响应中提取置信度"""
+        """Extract confidence from response"""
         if not response:
             return 0.5
 
         response_clean = response.strip()
 
-        # 尝试从【置信度】格式中提取
+        # Try to extract from 【Confidence】 format
         confidence_patterns = [
-            r'【置信度】\s*[:：]?\s*([0-9]*\.?[0-9]+)',
-            r'置信度[:：]\s*([0-9]*\.?[0-9]+)'
+            r'【Confidence】\s*[:：]?\s*([0-9]*\.?[0-9]+)',
+            r'Confidence[:：]\s*([0-9]*\.?[0-9]+)'
         ]
 
         for pattern in confidence_patterns:
@@ -513,13 +451,13 @@ class SingleRoleGPTClient:
             if confidence_match:
                 try:
                     confidence = float(confidence_match.group(1))
-                    # 确保置信度在0-1之间
+                    # Ensure confidence is between 0-1
                     confidence = max(0.0, min(1.0, confidence))
                     return confidence
                 except ValueError:
                     continue
 
-        # 如果没有明确找到，尝试查找0-1之间的数字
+        # If not explicitly found, try to find a number between 0-1
         number_pattern = r'(0?\.\d+|1\.0|0\.[0-9]+|1\.0+)'
         number_matches = re.findall(number_pattern, response_clean)
 
@@ -531,37 +469,37 @@ class SingleRoleGPTClient:
             except ValueError:
                 continue
 
-        return 0.5  # 默认值
+        return 0.5  # Default value
 
 
 class SingleRoleProcessor:
-    """单角色模型处理器 - 仅User Experience Designer"""
+    """Single-role model processor - User Experience Designer only"""
 
     def __init__(self, single_role_client: SingleRoleGPTClient):
         self.single_role_client = single_role_client
         self.start_time = None
         self.end_time = None
-        print(f"单角色模型处理器初始化完成，使用{single_role_client.role['name']}角色")
-        print(f"🔄 尝试机制: 先投一次，与label核对，不一致再投，最多3次")
+        print(f"Single-role model processor initialized, using {single_role_client.role['name']} role")
+        print(f"🔄 Retry mechanism: Vote once, compare with label, retry if inconsistent, up to 3 times")
 
     def process_dataset(self, dataset_with_labels: List[Dict], labels: List[str],
                         category_explanations: Dict[str, str] = None,
                         requirements_examples: Dict[str, List[str]] = None) -> List[DataPoint]:
-        """处理带标签的数据集"""
+        """Process dataset with labels"""
         data_points = []
 
         self.start_time = datetime.datetime.now()
-        print(f"🚀 单角色分析开始时间: {self.start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"🚀 Single-role analysis start time: {self.start_time.strftime('%Y-%m-%d %H:%M:%S')}")
 
-        print(f"开始处理 {len(dataset_with_labels)} 条带标签的软件需求...")
-        print(f"分类标签数量: {len(labels)} 个")
-        print(f"🎭 角色配置: User Experience Designer")
-        print(f"🔄 尝试机制: 1次 → 核对 → 不一致再投(最多3次)")
+        print(f"Starting to process {len(dataset_with_labels)} labeled software requirements...")
+        print(f"Number of classification labels: {len(labels)}")
+        print(f"🎭 Role configuration: User Experience Designer")
+        print(f"🔄 Retry mechanism: 1 vote → Compare → Retry if inconsistent (up to 3 times)")
 
         for i, item in enumerate(dataset_with_labels):
-            # 从数据中提取内容和人类标注
+            # Extract content and human annotation from data
             text = item.get('requirement', item.get('content', ''))
-            human_label = item.get('label', None)  # 注意：这里使用'label'列
+            human_label = item.get('label', None)  # Note: uses 'label' column
 
             if i % 2 == 0 and i > 0:
                 elapsed_time = datetime.datetime.now() - self.start_time
@@ -570,7 +508,7 @@ class SingleRoleProcessor:
                 avg_time_per_req = elapsed_time / processed if processed > 0 else elapsed_time
                 est_remaining = avg_time_per_req * remaining
 
-                print(f"  📈 进度: {i}/{len(dataset_with_labels)} - 已用时: {elapsed_time} - 预计剩余: {est_remaining}")
+                print(f"  📈 Progress: {i}/{len(dataset_with_labels)} - Elapsed: {elapsed_time} - Estimated remaining: {est_remaining}")
 
             data_point = DataPoint(content=text, human_label=human_label)
             prediction = self.single_role_client.analyze_with_retry(
@@ -582,17 +520,17 @@ class SingleRoleProcessor:
             data_points.append(data_point)
 
             if i < len(dataset_with_labels) - 1:
-                time.sleep(1)  # 降低延迟，GPT API可能更快
+                time.sleep(1)  # Lower latency, GPT API may be faster
 
         self.end_time = datetime.datetime.now()
         return data_points
 
     def save_results(self, results: List[DataPoint], output_file: str):
-        """保存最终结果到Excel文件"""
+        """Save final results to Excel file"""
         results_data = []
 
         for i, data_point in enumerate(results):
-            # 构建尝试记录
+            # Build attempt records
             attempts_info = ""
             human_label = data_point.human_label or "N/A"
             match_status = "N/A"
@@ -605,66 +543,66 @@ class SingleRoleProcessor:
 
                 if data_point.prediction.attempts:
                     attempts_summary = [
-                        f"尝试{a['attempt_number']}: {a['predicted_label']}({a['confidence']:.3f})"
+                        f"Attempt {a['attempt_number']}: {a['predicted_label']}({a['confidence']:.3f})"
                         for a in data_point.prediction.attempts
                     ]
                     attempts_info = "; ".join(attempts_summary)
 
                 if data_point.human_label:
-                    match_status = "✅ 一致" if data_point.prediction.match_result else "❌ 不一致"
+                    match_status = "✅ Consistent" if data_point.prediction.match_result else "❌ Inconsistent"
                     if data_point.prediction.final_reason and not data_point.prediction.match_result:
                         reason = data_point.prediction.final_reason
 
             row_data = {
-                '序号': i + 1,
-                '需求内容': data_point.content,
-                '模型名称': data_point.prediction.model_name if data_point.prediction else "N/A",
-                '人类标注标签': human_label,
-                '模型最终预测': data_point.final_label,
-                '是否一致': match_status,
-                '总尝试次数': data_point.prediction.total_attempts if data_point.prediction else 0,
-                '不一致原因': reason,
-                '每次尝试记录': attempts_info,
-                '最终置信度': round(confidence, 3),
-                '备注': f"共{data_point.prediction.total_attempts}次尝试" if data_point.prediction else ""
+                'Serial No.': i + 1,
+                'Requirement Content': data_point.content,
+                'Model Name': data_point.prediction.model_name if data_point.prediction else "N/A",
+                'Human Annotation Label': human_label,
+                'Model Final Prediction': data_point.final_label,
+                'Consistent': match_status,
+                'Total Attempts': data_point.prediction.total_attempts if data_point.prediction else 0,
+                'Reason for Inconsistency': reason,
+                'Attempt Records': attempts_info,
+                'Final Confidence': round(confidence, 3),
+                'Notes': f"Total {data_point.prediction.total_attempts} attempts" if data_point.prediction else ""
             }
             results_data.append(row_data)
 
         df = pd.DataFrame(results_data)
         os.makedirs(os.path.dirname(output_file) if os.path.dirname(output_file) else '.', exist_ok=True)
         df.to_excel(output_file, index=False, engine='openpyxl')
-        print(f"\n✅ 单角色分析结果已保存到: {output_file}")
+        print(f"\n✅ Single-role analysis results saved to: {output_file}")
 
-        # 保存详细报告
+        # Save detailed report
         self._save_detailed_report(results, output_file)
 
     def _save_detailed_report(self, results: List[DataPoint], output_file: str):
-        """保存详细分析报告"""
-        report_file = output_file.replace('.xlsx', '_详细报告.txt')
+        """Save detailed analysis report"""
+        report_file = output_file.replace('.xlsx', '_detailed_report.txt')
 
         with open(report_file, 'w', encoding='utf-8') as f:
             f.write("=" * 80 + "\n")
-            f.write("GPT-4.1-nano模型-User Experience Designer单角色分类系统分析报告\n")
-            f.write("特殊配置: 先投一次，与label核对，不一致再投，最多3次\n")
+            f.write("GPT-4.1-nano Model - User Experience Designer Single-Role Classification System Analysis Report\n")
+            f.write("Special Configuration: Vote once, compare with label, retry if inconsistent, up to 3 times\n")
             f.write("=" * 80 + "\n\n")
 
-            f.write(f"分析时间: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write(f"总需求数量: {len(results)}\n")
-            f.write("使用的专业角色:\n")
-            f.write("1. User Experience Designer (用户体验设计师)\n\n")
+            f.write(f"Analysis Time: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Total Requirements: {len(results)}\n")
+            f.write("Professional Roles Used:\n")
+            f.write("1. User Experience Designer\n\n")
 
-            f.write("🔄 尝试机制:\n")
-            f.write("  1. 第一次投票\n")
-            f.write("  2. 与数据集中的label列核对\n")
-            f.write("  3. 如果不一致，进行第二次投票\n")
-            f.write("  4. 再次核对，如果不一致且未达3次，进行第三次投票\n")
-            f.write("  5. 如果3次后仍不一致，记录原因\n\n")
+            f.write("🔄 Retry Mechanism:\n")
+            f.write("  1. First vote\n")
+            f.write("  2. Compare with label column in dataset\n")
+            f.write("  3. If inconsistent, proceed to second vote\n")
+            f.write("  4. Compare again, if still inconsistent and not yet 3 attempts, proceed to third vote\n")
+            f.write("  5. If still inconsistent after 3 attempts, record reason\n\n")
 
-            f.write("🎯 置信度机制:\n")
-            f.write("  - 每次投票LLM自我评估置信度\n")
-            f.write("  - 最终置信度使用最后一次投票的置信度\n\n")
+            f.write("🎯 Confidence Mechanism:\n")
+            f.write("  - LLM self-assesses confidence for each vote\n")
+            f.write("  - Final confidence uses confidence from the last vote\n\n")
 
-            # 计算一致率
+            # Calculate consistency rate
             total_with_human_label = 0
             match_count = 0
             total_attempts = 0
@@ -687,17 +625,17 @@ class SingleRoleProcessor:
                             'attempts': dp.prediction.total_attempts if dp.prediction else 0
                         })
 
-            f.write("📊 一致率统计:\n")
+            f.write("📊 Consistency Rate Statistics:\n")
             f.write("-" * 80 + "\n")
             if total_with_human_label > 0:
-                f.write(f"总样本数（有人类标注）: {total_with_human_label}\n")
-                f.write(f"一致样本数: {match_count}\n")
-                f.write(f"一致率: {(match_count / total_with_human_label * 100):.1f}%\n")
-                f.write(f"平均尝试次数: {(total_attempts / total_with_human_label):.2f}\n\n")
+                f.write(f"Total Samples (with human annotation): {total_with_human_label}\n")
+                f.write(f"Consistent Samples: {match_count}\n")
+                f.write(f"Consistency Rate: {(match_count / total_with_human_label * 100):.1f}%\n")
+                f.write(f"Average Attempts: {(total_attempts / total_with_human_label):.2f}\n\n")
             else:
-                f.write("无人类标注数据可用于一致率统计\n\n")
+                f.write("No human annotation data available for consistency rate calculation\n\n")
 
-            # 尝试次数分布
+            # Attempt distribution
             attempt_distribution = {1: 0, 2: 0, 3: 0}
             for dp in results:
                 if dp.prediction:
@@ -705,50 +643,50 @@ class SingleRoleProcessor:
                     if attempts in attempt_distribution:
                         attempt_distribution[attempts] += 1
 
-            f.write("🔄 尝试次数分布:\n")
+            f.write("🔄 Attempt Distribution:\n")
             for attempts, count in attempt_distribution.items():
                 if count > 0:
                     percentage = count / len(results) * 100
-                    f.write(f"  {attempts}次尝试: {count}条 ({percentage:.1f}%)\n")
+                    f.write(f"  {attempts} attempt(s): {count} ({percentage:.1f}%)\n")
             f.write("\n")
 
-            # 不一致原因分析
+            # Inconsistency reason analysis
             if inconsistencies:
-                f.write("💭 不一致原因分析 (3次尝试后仍不一致):\n")
+                f.write("💭 Inconsistency Reason Analysis (still inconsistent after 3 attempts):\n")
                 f.write("-" * 80 + "\n")
                 for inc in inconsistencies:
-                    f.write(f"第{inc['index']}条:\n")
-                    f.write(f"  模型预测: {inc['model']} (置信度: {inc['confidence']:.3f})\n")
-                    f.write(f"  人类标注: {inc['human']}\n")
-                    f.write(f"  尝试次数: {inc['attempts']}\n")
-                    f.write(f"  原因: {inc['reason']}\n\n")
+                    f.write(f"Item {inc['index']}:\n")
+                    f.write(f"  Model Prediction: {inc['model']} (Confidence: {inc['confidence']:.3f})\n")
+                    f.write(f"  Human Annotation: {inc['human']}\n")
+                    f.write(f"  Attempts: {inc['attempts']}\n")
+                    f.write(f"  Reason: {inc['reason']}\n\n")
 
             f.write("\n" + "=" * 80 + "\n")
 
-        print(f"✅ 详细分析报告已保存到: {report_file}")
+        print(f"✅ Detailed analysis report saved to: {report_file}")
 
     def print_statistics(self, results: List[DataPoint]):
-        """打印统计信息"""
+        """Print statistical information"""
         print(f"\n{'=' * 60}")
-        print("📊 GPT-4.1-nano模型-User Experience Designer单角色分类统计信息")
-        print(f"特殊配置: 先投一次，核对label，不一致再投，最多3次")
+        print("📊 GPT-4.1-nano Model - User Experience Designer Single-Role Classification Statistics")
+        print(f"Special Configuration: Vote once, compare with label, retry if inconsistent, up to 3 times")
         print(f"{'=' * 60}")
 
-        print(f"处理总数据量: {len(results)}条需求")
-        print(f"使用角色: User Experience Designer")
+        print(f"Total Data Processed: {len(results)} requirements")
+        print(f"Role Used: User Experience Designer")
 
         if self.start_time and self.end_time:
             total_duration = self.end_time - self.start_time
-            print(f"\n⏰ 时间统计:")
-            print(f"  开始时间: {self.start_time.strftime('%Y-%m-%d %H:%M:%S')}")
-            print(f"  结束时间: {self.end_time.strftime('%Y-%m-%d %H:%M:%S')}")
-            print(f"  总运行时间: {total_duration}")
+            print(f"\n⏰ Time Statistics:")
+            print(f"  Start Time: {self.start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+            print(f"  End Time: {self.end_time.strftime('%Y-%m-%d %H:%M:%S')}")
+            print(f"  Total Runtime: {total_duration}")
 
             if len(results) > 0:
                 avg_time_per_req = total_duration / len(results)
-                print(f"  平均每条需求处理时间: {avg_time_per_req}")
+                print(f"  Average Time per Requirement: {avg_time_per_req}")
 
-        # 一致率统计
+        # Consistency rate statistics
         total_with_human_label = 0
         match_count = 0
         total_attempts = 0
@@ -761,18 +699,18 @@ class SingleRoleProcessor:
                 if dp.prediction:
                     total_attempts += dp.prediction.total_attempts
 
-        print(f"\n🎯 一致率统计:")
+        print(f"\n🎯 Consistency Rate Statistics:")
         if total_with_human_label > 0:
             match_rate = match_count / total_with_human_label * 100
-            print(f"  有人类标注的样本数: {total_with_human_label}")
-            print(f"  一致样本数: {match_count}")
-            print(f"  一致率: {match_rate:.1f}%")
-            print(f"  总尝试次数: {total_attempts}")
-            print(f"  平均尝试次数: {total_attempts / total_with_human_label:.2f}")
+            print(f"  Samples with Human Annotation: {total_with_human_label}")
+            print(f"  Consistent Samples: {match_count}")
+            print(f"  Consistency Rate: {match_rate:.1f}%")
+            print(f"  Total Attempts: {total_attempts}")
+            print(f"  Average Attempts: {total_attempts / total_with_human_label:.2f}")
         else:
-            print(f"  无人类标注数据")
+            print(f"  No Human Annotation Data")
 
-        # 尝试次数分布
+        # Attempt distribution
         attempt_distribution = {1: 0, 2: 0, 3: 0}
         for dp in results:
             if dp.prediction:
@@ -780,32 +718,32 @@ class SingleRoleProcessor:
                 if attempts in attempt_distribution:
                     attempt_distribution[attempts] += 1
 
-        print(f"\n🔄 尝试次数分布:")
+        print(f"\n🔄 Attempt Distribution:")
         for attempts, count in attempt_distribution.items():
             if count > 0:
                 percentage = count / len(results) * 100
-                print(f"  {attempts}次尝试: {count}条 ({percentage:.1f}%)")
+                print(f"  {attempts} attempt(s): {count} ({percentage:.1f}%)")
 
 
 class DataLoader:
-    """数据加载器类"""
+    """Data loader class"""
 
     @staticmethod
     def load_dataset_with_labels(file_path: str) -> List[Dict]:
-        """从dataset文件加载需求和人类标注"""
+        """Load requirements and human annotations from dataset file"""
         try:
             df = pd.read_excel(file_path)
             dataset_with_labels = []
 
-            # 检查必需的列
+            # Check required columns
             if 'requirement' not in df.columns:
-                print(f"⚠️  文件中没有'requirement'列，尝试使用第一列作为需求内容")
+                print(f"⚠️  File does not have a 'requirement' column, attempting to use first column as requirement content")
                 requirement_col = df.columns[0]
             else:
                 requirement_col = 'requirement'
 
             if 'label' not in df.columns:
-                print(f"⚠️  文件中没有'label'列，将无法进行标注对比")
+                print(f"⚠️  File does not have a 'label' column, annotation comparison will not be possible")
                 label_col = None
             else:
                 label_col = 'label'
@@ -821,18 +759,18 @@ class DataLoader:
 
                     dataset_with_labels.append(item)
 
-            print(f"✅ 成功从 {os.path.basename(file_path)} 加载 {len(dataset_with_labels)} 条带标签的测试需求")
+            print(f"✅ Successfully loaded {len(dataset_with_labels)} labeled test requirements from {os.path.basename(file_path)}")
             if label_col:
-                print(f"  其中 {sum(1 for item in dataset_with_labels if 'label' in item)} 条有标注")
+                print(f"  Of which {sum(1 for item in dataset_with_labels if 'label' in item)} have annotations")
             return dataset_with_labels
 
         except Exception as e:
-            print(f"❌ 加载数据集文件 {os.path.basename(file_path)} 出错: {e}")
+            print(f"❌ Error loading dataset file {os.path.basename(file_path)}: {e}")
             return []
 
     @staticmethod
     def load_categories_and_explanations(file_path: str) -> Dict[str, str]:
-        """从concept文件加载类别和解释"""
+        """Load categories and explanations from concept file"""
         try:
             df = pd.read_excel(file_path, sheet_name='Sheet1')
             categories = {}
@@ -841,15 +779,15 @@ class DataLoader:
                     category = str(row['category']).strip()
                     explanation = str(row['explanation']).strip() if pd.notna(row.get('explanation')) else ""
                     categories[category] = explanation
-            print(f"✅ 成功从 {os.path.basename(file_path)} 加载 {len(categories)} 个分类标签")
+            print(f"✅ Successfully loaded {len(categories)} classification labels from {os.path.basename(file_path)}")
             return categories
         except Exception as e:
-            print(f"❌ 加载类别文件 {os.path.basename(file_path)} 出错: {e}")
+            print(f"❌ Error loading category file {os.path.basename(file_path)}: {e}")
             return {}
 
     @staticmethod
     def load_requirements_examples(file_path: str) -> Dict[str, List[str]]:
-        """从examples文件加载需求示例"""
+        """Load requirement examples from examples file"""
         try:
             df = pd.read_excel(file_path, sheet_name='Sheet1')
             requirements_examples = {}
@@ -869,18 +807,18 @@ class DataLoader:
                     if boilerplate_type and examples:
                         requirements_examples[boilerplate_type] = examples
 
-            print(f"✅ 成功从 {os.path.basename(file_path)} 加载 {len(requirements_examples)} 个类别的需求示例")
+            print(f"✅ Successfully loaded {len(requirements_examples)} requirement examples by category from {os.path.basename(file_path)}")
             return requirements_examples
 
         except Exception as e:
-            print(f"❌ 加载需求示例文件 {os.path.basename(file_path)} 出错: {e}")
+            print(f"❌ Error loading requirement examples file {os.path.basename(file_path)}: {e}")
             return {}
 
 
 def main():
-    """主函数"""
-    # 文件路径配置
-    dataset_file = "1000dataset.xlsx"  # 必须包含'requirement'和'label'列
+    """Main function"""
+    # File path configuration
+    dataset_file = "1000dataset.xlsx"  # Must contain 'requirement' and 'label' columns
     concept_file = "1123Concept.xlsx"
     examples_file = "1122RequirementExamples.xlsx"
     output_file = "gpt_UXDesigner_retry_mechanism.xlsx"
@@ -888,99 +826,99 @@ def main():
     data_loader = DataLoader()
 
     print("=" * 80)
-    print("🎨 GPT-4.1-nano模型-User Experience Designer单角色分类系统")
-    print("特殊配置: 先投一次，与dataset.xlsx中的label列核对")
-    print("🔄 重试机制: 如果不一致，再投第二次，最多3次")
-    print("📝 原因记录: 如果3次后仍不一致，记录详细原因")
+    print("🎨 GPT-4.1-nano Model - User Experience Designer Single-Role Classification System")
+    print("Special Configuration: Vote once, compare with label column in dataset.xlsx")
+    print("🔄 Retry Mechanism: If inconsistent, vote again, up to 3 times")
+    print("📝 Reason Recording: If still inconsistent after 3 attempts, record detailed reason")
     print("=" * 80)
 
-    # 检查环境变量
-    print(f"\n🔧 环境检查:")
+    # Check environment variables
+    print(f"\n🔧 Environment Check:")
     api_key = os.getenv('OPENAI_API_KEY')
     if api_key:
-        print(f"✅ OPENAI_API_KEY 已设置 (长度: {len(api_key)})")
+        print(f"✅ OPENAI_API_KEY is set (length: {len(api_key)})")
     else:
-        print(f"❌ OPENAI_API_KEY 未设置")
-        print(f"💡 请设置环境变量 OPENAI_API_KEY")
+        print(f"❌ OPENAI_API_KEY is not set")
+        print(f"💡 Please set the OPENAI_API_KEY environment variable")
         return
 
-    # 检查数据文件是否存在
-    print(f"\n📁 检查数据文件:")
+    # Check if data files exist
+    print(f"\n📁 Checking data files:")
     files_to_check = [dataset_file, concept_file, examples_file]
     all_files_exist = True
 
     for file_path in files_to_check:
         if os.path.exists(file_path):
-            print(f"✅ {file_path} 存在")
+            print(f"✅ {file_path} exists")
         else:
-            print(f"❌ {file_path} 不存在")
+            print(f"❌ {file_path} does not exist")
             all_files_exist = False
 
     if not all_files_exist:
-        print(f"💡 请确保以下文件存在于当前目录:")
+        print(f"💡 Please ensure the following files exist in the current directory:")
         for file_path in files_to_check:
             print(f"   - {file_path}")
         return
 
     try:
-        # 创建单角色GPT模型客户端
-        print(f"\n🚀 创建单角色模型客户端...")
+        # Create single-role GPT model client
+        print(f"\n🚀 Creating single-role model client...")
         single_role_client = SingleRoleGPTClient(
             name="GPT-4.1-nano-UXDesigner",
             model_name="gpt-4.1-nano"
         )
     except Exception as e:
-        print(f"❌ 创建单角色模型客户端失败: {e}")
+        print(f"❌ Failed to create single-role model client: {e}")
         return
 
-    # 加载类别、解释和例子
-    print(f"\n📚 加载数据文件...")
+    # Load categories, explanations, and examples
+    print(f"\n📚 Loading data files...")
     category_explanations = data_loader.load_categories_and_explanations(concept_file)
     requirements_examples = data_loader.load_requirements_examples(examples_file)
     labels = list(category_explanations.keys())
 
-    # 加载带标签的数据集
+    # Load labeled dataset
     dataset_with_labels = data_loader.load_dataset_with_labels(dataset_file)
 
     if not dataset_with_labels:
-        print("❌ 没有找到测试需求，程序退出")
+        print("❌ No test requirements found, program exiting")
         return
 
     if not labels:
-        print("❌ 没有找到分类标签，程序退出")
+        print("❌ No classification labels found, program exiting")
         return
 
-    print(f"\n✅ 数据加载完成:")
-    print(f"  分类标签: {len(labels)} 个")
-    print(f"  测试需求: {len(dataset_with_labels)} 条")
+    print(f"\n✅ Data loading complete:")
+    print(f"  Classification labels: {len(labels)}")
+    print(f"  Test requirements: {len(dataset_with_labels)}")
 
-    # 统计有多少条有标注
+    # Count how many have annotations
     labeled_count = sum(1 for item in dataset_with_labels if 'label' in item)
-    print(f"  有标注的需求: {labeled_count} 条")
+    print(f"  Requirements with annotations: {labeled_count}")
 
     if labeled_count == 0:
-        print(f"\n⚠️  警告: 数据集中没有label列，将无法进行标注对比")
-        print(f"  重试机制将不会被触发")
+        print(f"\n⚠️  Warning: The dataset does not have a 'label' column, annotation comparison will not be possible")
+        print(f"  The retry mechanism will not be triggered")
 
-    # 执行单角色模型处理
-    print(f"\n🚀 开始GPT-4.1-nano模型UX Designer单角色分类处理...")
-    print(f"🎯 注意: 每次投票后都会与数据集中的label列核对")
-    print(f"🔄 重试机制: 不一致 → 重投 → 最多3次 → 记录原因")
+    # Execute single-role model processing
+    print(f"\n🚀 Starting GPT-4.1-nano model UX Designer single-role classification processing...")
+    print(f"🎯 Note: Each vote will be compared with the label column in the dataset")
+    print(f"🔄 Retry Mechanism: Inconsistent → Retry → Up to 3 times → Record reason")
 
     processor = SingleRoleProcessor(single_role_client)
 
     results = processor.process_dataset(dataset_with_labels, labels, category_explanations, requirements_examples)
 
-    # 保存和显示结果
+    # Save and display results
     processor.save_results(results, output_file)
     processor.print_statistics(results)
 
     print(f"\n{'=' * 80}")
-    print("🎉 GPT-4.1-nano模型UX Designer单角色分类处理完成!")
-    print(f"📊 结果文件: {output_file}")
-    print(f"📄 详细报告: {output_file.replace('.xlsx', '_详细报告.txt')}")
-    print(f"🔄 重试机制: 1次投票 → 核对label → 不一致再投(最多3次)")
-    print(f"📝 原因记录: 3次后仍不一致 → 记录详细原因")
+    print("🎉 GPT-4.1-nano Model UX Designer Single-Role Classification Processing Complete!")
+    print(f"📊 Results file: {output_file}")
+    print(f"📄 Detailed report: {output_file.replace('.xlsx', '_detailed_report.txt')}")
+    print(f"🔄 Retry Mechanism: 1 vote → Compare with label → Retry if inconsistent (up to 3 times)")
+    print(f"📝 Reason Recording: Still inconsistent after 3 attempts → Record detailed reason")
     print("=" * 80)
 
 
